@@ -14,6 +14,10 @@ public class TerminalBuffer {
     private final ArrayDeque<Cell[]> scrollback = new ArrayDeque<>();
     private CursorPosition cursor = new CursorPosition(0, 0);
 
+    private TerminalColor currentFg = TerminalColor.DEFAULT;
+    private TerminalColor currentBg = TerminalColor.DEFAULT;
+    private CellStyle currentStyle = CellStyle.DEFAULT;
+
     public TerminalBuffer(int width, int height, int scrollbackMaxSize) {
         if (width <= 0) throw new IllegalArgumentException("width must be positive, got " + width);
         if (height <= 0) throw new IllegalArgumentException("height must be positive, got " + height);
@@ -33,11 +37,51 @@ public class TerminalBuffer {
     public int getHeight() { return height; }
     public int getScrollbackMaxSize() { return scrollbackMaxSize; }
     public int getScrollbackSize() { return scrollback.size(); }
+
+    // Attributes
+    public TerminalColor getCurrentFg() { return currentFg; }
+    public TerminalColor getCurrentBg() { return currentBg; }
+    public CellStyle getCurrentStyle() { return currentStyle; }
+
+    public void setAttributes(TerminalColor fg, TerminalColor bg, CellStyle style) {
+        if (fg == null) throw new IllegalArgumentException("fg must not be null");
+        if (bg == null) throw new IllegalArgumentException("bg must not be null");
+        if (style == null) throw new IllegalArgumentException("style must not be null");
+        this.currentFg = fg;
+        this.currentBg = bg;
+        this.currentStyle = style;
+    }
+
+    // Cursor
     public CursorPosition getCursor() { return cursor; }
+
+    public void setCursor(int row, int col) {
+        cursor = new CursorPosition(clampRow(row), clampCol(col));
+    }
+
+    public void moveCursorUp(int n) {
+        setCursor(cursor.row() - n, cursor.col());
+    }
+
+    public void moveCursorDown(int n) {
+        setCursor(cursor.row() + n, cursor.col());
+    }
+
+    public void moveCursorLeft(int n) {
+        setCursor(cursor.row(), cursor.col() - n);
+    }
+
+    public void moveCursorRight(int n) {
+        setCursor(cursor.row(), cursor.col() + n);
+    }
+
+    // Helpers
+    private int clampRow(int row) { return Math.max(0, Math.min(height - 1, row)); }
+    private int clampCol(int col) { return Math.max(0, Math.min(width - 1, col)); }
 
     private Cell[] blankLine() {
         Cell[] line = new Cell[width];
-        Arrays.fill(line, new Cell(null));
+        Arrays.fill(line, Cell.EMPTY);
         return line;
     }
 }
