@@ -53,31 +53,41 @@ public class TerminalBuffer {
     }
 
     // Cursor
-    public CursorPosition getCursor() { return cursor; }
+    public CursorPosition getCursorPosition() { return cursor; }
+    public int getCursorColumn() { return cursor.col(); }
+    public int getCursorRow() { return cursor.row(); }
 
-    public void setCursor(int row, int col) {
-        cursor = new CursorPosition(clampRow(row), clampCol(col));
+    public void setCursorPosition(int column, int row) {
+        cursor = new CursorPosition(clampCol(column), clampRow(row));
     }
 
     public void moveCursorUp(int n) {
-        setCursor(cursor.row() - n, cursor.col());
+        raiseExcIfNegative(n);
+        setCursorPosition(cursor.row() - n, cursor.col());
     }
 
     public void moveCursorDown(int n) {
-        setCursor(cursor.row() + n, cursor.col());
+        raiseExcIfNegative(n);
+        setCursorPosition(cursor.row() + n, cursor.col());
     }
 
     public void moveCursorLeft(int n) {
-        setCursor(cursor.row(), cursor.col() - n);
+        raiseExcIfNegative(n);
+        setCursorPosition(cursor.row(), cursor.col() - n);
     }
 
     public void moveCursorRight(int n) {
-        setCursor(cursor.row(), cursor.col() + n);
+        raiseExcIfNegative(n);
+        setCursorPosition(cursor.row(), cursor.col() + n);
     }
 
     // Helpers
     private int clampRow(int row) { return Math.max(0, Math.min(height - 1, row)); }
     private int clampCol(int col) { return Math.max(0, Math.min(width - 1, col)); }
+
+    private void raiseExcIfNegative(int n) {
+        if (n < 0) throw new IllegalArgumentException("n must be non-negative, got " + n);
+    }
 
     private Cell[] blankLine() {
         Cell[] line = new Cell[width];
