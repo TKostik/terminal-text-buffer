@@ -7,10 +7,10 @@ import java.util.List;
 
 public class TerminalBuffer {
 
-    private final int height;
-    private final int width;
+    private int height;
+    private int width;
     private final int scrollbackMaxSize;
-    private final Cell[][] screen;
+    private Cell[][] screen;
     private final ArrayDeque<Cell[]> scrollback = new ArrayDeque<>();
     private CursorPosition cursor = new CursorPosition(0, 0);
 
@@ -202,6 +202,60 @@ public class TerminalBuffer {
         scrollback.clear();
     }
 
+    public void resize(int newWidth, int newHeight) {
+        if (newWidth <= 0) throw new IllegalArgumentException("newWidth must be positive, got " + newWidth);
+        if (newHeight <= 0) throw new IllegalArgumentException("newHeight must be positive, got " + newHeight);
+
+        int oldWidth = this.width;
+        int oldHeight = this.height;
+        Cell[][] oldScreen = this.screen;
+
+        Cell[][] newScreen = new Cell[newHeight][];
+        for (int row = 0; row < newHeight; row++) {
+            newScreen[row] = blankLine(newWidth);
+        }
+
+        int pulledFromScrollback = 0;
+        if (newHeight > oldHeight && !scrollback.isEmpty()) {
+            pulledFromScrollback = Math.min(newHeight - oldHeight, scrollback.size());
+            for (int targetRow = pulledFromScrollback - 1; targetRow >= 0; targetRow--) {
+                Cell[] source = scrollback.removeLast();
+                copyLineToWidth(source, newScreen[targetRow], newWidth);
+            }
+        }
+
+        int rowsToCopy = Math.min(oldHeight, newHeight);
+        int sourceStartRow = oldHeight - rowsToCopy;
+        int targetStartRow = pulledFromScrollback;
+
+        if (newHeight < oldHeight) {
+            for (int row = 0; row < sourceStartRow; row++) {
+                pushToScrollback(oldScreen[row].clone());
+            }
+        }
+
+        for (int rowOffset = 0; rowOffset < rowsToCopy && targetStartRow + rowOffset < newHeight; rowOffset++) {
+            Cell[] source = oldScreen[sourceStartRow + rowOffset];
+            Cell[] target = newScreen[targetStartRow + rowOffset];
+            copyLineToWidth(source, target, newWidth);
+        }
+
+        this.screen = newScreen;
+        this.width = newWidth;
+        this.height = newHeight;
+        resizeScrollbackLinesToWidth(newWidth);
+
+        int resizedCursorRow = cursor.row();
+        if (newHeight < oldHeight) {
+            int droppedRows = oldHeight - newHeight;
+            resizedCursorRow = resizedCursorRow - droppedRows;
+        } else if (newHeight > oldHeight) {
+            resizedCursorRow = resizedCursorRow + pulledFromScrollback;
+        }
+
+        setCursorPosition(resizedCursorRow, cursor.col());
+    }
+
     // Helpers
     private int clampRow(int row) { return Math.max(0, Math.min(height - 1, row)); }
     private int clampCol(int col) { return Math.max(0, Math.min(width - 1, col)); }
@@ -285,8 +339,32 @@ public class TerminalBuffer {
     }
 
     private Cell[] blankLine() {
-        Cell[] line = new Cell[width];
+        return blankLine(this.width);
+    }
+
+    private Cell[] blankLine(int targetWidth) {
+        Cell[] line = new Cell[targetWidth];
         Arrays.fill(line, Cell.EMPTY);
         return line;
+    }
+
+    private void copyLineToWidth(Cell[] source, Cell[] target, int targetWidth) {
+        int copyLength = Math.min(source.length, targetWidth);
+        System.arraycopy(source, 0, target, 0, copyLength);
+    }
+
+    private void resizeScrollbackLinesToWidth(int targetWidth) {
+        if (scrollback.isEmpty()) {
+            return;
+        }
+
+        Cell[][] snapshot = scrollback.toArray(new Cell[0][]);
+        scrollback.clear();
+        for (Cell[] oldLine : snapshot) {
+            Cell[] resized = blankLine(targetWidth);
+            int copyLength = Math.min(oldLine.length, targetWidth);
+            System.arraycopy(oldLine, 0, resized, 0, copyLength);
+            scrollback.addLast(resized);
+        }
     }
 }
