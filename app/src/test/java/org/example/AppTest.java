@@ -135,6 +135,39 @@ class AppTest {
         assertEquals(0, buffer.getScrollbackSize());
     }
 
+    @Test
+    void contentAccessReturnsCharactersAttributesAndStrings() {
+        TerminalBuffer buffer = new TerminalBuffer(4, 2, 10);
+        CellStyle style = new CellStyle(true, true, false);
+        buffer.setAttributes(TerminalColor.YELLOW, TerminalColor.BLUE, style);
+        buffer.setCursorPosition(0, 1);
+        buffer.writeTextOnLine("AB");
+
+        assertEquals('A', buffer.getScreenCharacterAt(0, 1));
+        assertEquals(null, buffer.getScreenCharacterAt(0, 0));
+        assertEquals(new CellAttributes(TerminalColor.YELLOW, TerminalColor.BLUE, style),
+                buffer.getScreenAttributesAt(0, 1));
+        assertEquals(" AB ", buffer.getScreenLineAsString(0));
+        assertEquals(" AB \n    ", buffer.getScreenContentAsString());
+    }
+
+    @Test
+    void contentAccessIncludesScrollback() {
+        TerminalBuffer buffer = new TerminalBuffer(4, 2, 10);
+        buffer.setAttributes(TerminalColor.GREEN, TerminalColor.DEFAULT, CellStyle.DEFAULT);
+        buffer.setCursorPosition(0, 0);
+        buffer.writeTextOnLine("1111");
+        buffer.setCursorPosition(1, 0);
+        buffer.writeTextOnLine("2222");
+        buffer.insertEmptyLineAtBottom();
+
+        assertEquals('1', buffer.getScrollbackCharacterAt(0, 0));
+        assertEquals(new CellAttributes(TerminalColor.GREEN, TerminalColor.DEFAULT, CellStyle.DEFAULT),
+                buffer.getScrollbackAttributesAt(0, 0));
+        assertEquals("1111", buffer.getScrollbackLineAsString(0));
+        assertEquals("1111\n2222\n    ", buffer.getScreenAndScrollbackContentAsString());
+    }
+
     private String lineToChars(List<Cell> line) {
         StringBuilder sb = new StringBuilder(line.size());
         for (Cell cell : line) {
