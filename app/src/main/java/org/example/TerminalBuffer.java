@@ -1,22 +1,43 @@
 package org.example;
 
+import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class TerminalBuffer {
+
+    private static final char EMPTY_CHAR = '\0';
 
     private int height;
     private int width;
     private final int scrollbackMaxSize;
-    private Cell[][] screen;
-    private final ArrayDeque<Cell[]> scrollback = new ArrayDeque<>();
+    private char[][] screenChars;
+    private int[][] screenStyleIds;
+    private final ArrayDeque<LineData> scrollback = new ArrayDeque<>();
     private CursorPosition cursor = new CursorPosition(0, 0);
 
     private TerminalColor currentFg = TerminalColor.DEFAULT;
     private TerminalColor currentBg = TerminalColor.DEFAULT;
     private CellStyle currentStyle = CellStyle.DEFAULT;
+    private int currentAttributesId;
+
+    private final List<CellAttributes> attributesById = new ArrayList<>();
+    private final Map<CellAttributes, Integer> attributeIds = new HashMap<>();
+    private final int defaultAttributesId;
+
+    private static final class LineData {
+        private final char[] chars;
+        private final int[] styleIds;
+
+        private LineData(char[] chars, int[] styleIds) {
+            this.chars = chars;
+            this.styleIds = styleIds;
+        }
+    }
 
     public TerminalBuffer(int width, int height, int scrollbackMaxSize) {
         if (width <= 0) throw new IllegalArgumentException("width must be positive, got " + width);
@@ -27,9 +48,18 @@ public class TerminalBuffer {
         this.height = height;
         this.scrollbackMaxSize = scrollbackMaxSize;
 
-        this.screen = new Cell[height][];
+        this.defaultAttributesId = internAttributes(new CellAttributes(
+                TerminalColor.DEFAULT,
+                TerminalColor.DEFAULT,
+                CellStyle.DEFAULT
+        ));
+        this.currentAttributesId = this.defaultAttributesId;
+
+        this.screenChars = new char[height][];
+        this.screenStyleIds = new int[height][];
         for (int i = 0; i < height; i++) {
-            screen[i] = blankLine();
+            screenChars[i] = blankCharLine();
+            screenStyleIds[i] = blankStyleLine();
         }
     }
 
@@ -42,39 +72,43 @@ public class TerminalBuffer {
         if (row < 0 || row >= height) {
             throw new IllegalArgumentException("row out of bounds: " + row);
         }
-        return Collections.unmodifiableList(Arrays.asList(screen[row].clone()));
+        return Collections.unmodifiableList(Arrays.asList(cellsFromLine(screenChars[row], screenStyleIds[row])));
     }
 
     public List<Cell> scrollbackLine(int index) {
-        if (index < 0 || index >= scrollback.size()) {
-            throw new IllegalArgumentException("scrollback index out of bounds: " + index);
-        }
-        Cell[][] snapshot = scrollback.toArray(new Cell[0][]);
-        return Collections.unmodifiableList(Arrays.asList(snapshot[index].clone()));
+        LineData line = scrollbackLineDataAt(index);
+        return Collections.unmodifiableList(Arrays.asList(cellsFromLine(line.chars, line.styleIds)));
     }
 
     public Character getScreenCharacterAt(int row, int col) {
-        return screenCellAt(row, col).character();
+        validateRow(row);
+        validateCol(col);
+        return charAsNullable(screenChars[row][col]);
     }
 
     public Character getScrollbackCharacterAt(int lineIndex, int col) {
-        return scrollbackCellAt(lineIndex, col).character();
+        validateCol(col);
+        return charAsNullable(scrollbackLineDataAt(lineIndex).chars[col]);
     }
 
     public CellAttributes getScreenAttributesAt(int row, int col) {
-        return screenCellAt(row, col).attributes();
+        validateRow(row);
+        validateCol(col);
+        return attributesById.get(screenStyleIds[row][col]);
     }
 
     public CellAttributes getScrollbackAttributesAt(int lineIndex, int col) {
-        return scrollbackCellAt(lineIndex, col).attributes();
+        validateCol(col);
+        return attributesById.get(scrollbackLineDataAt(lineIndex).styleIds[col]);
     }
 
     public String getScreenLineAsString(int row) {
-        return lineToString(screenLine(row));
+        validateRow(row);
+        return lineToString(screenChars[row]);
     }
 
     public String getScrollbackLineAsString(int index) {
-        return lineToString(scrollbackLine(index));
+        return lineToString(scrollbackLineDataAt(index).chars);
     }
 
     public String getScreenContentAsString() {
@@ -83,7 +117,7 @@ public class TerminalBuffer {
             if (row > 0) {
                 sb.append('\n');
             }
-            sb.append(getScreenLineAsString(row));
+            sb.append(lineToString(screenChars[row]));
         }
         return sb.toString();
     }
@@ -94,13 +128,13 @@ public class TerminalBuffer {
             if (sb.length() > 0) {
                 sb.append('\n');
             }
-            sb.append(getScrollbackLineAsString(i));
+            sb.append(lineToString(scrollbackLineDataAt(i).chars));
         }
         for (int row = 0; row < height; row++) {
             if (sb.length() > 0) {
                 sb.append('\n');
             }
-            sb.append(getScreenLineAsString(row));
+            sb.append(lineToString(screenChars[row]));
         }
         return sb.toString();
     }
@@ -117,6 +151,7 @@ public class TerminalBuffer {
         this.currentFg = fg;
         this.currentBg = bg;
         this.currentStyle = style;
+        this.currentAttributesId = internAttributes(new CellAttributes(fg, bg, style));
     }
 
     // Cursor
@@ -155,12 +190,8 @@ public class TerminalBuffer {
         int row = cursor.row();
         int col = cursor.col();
         for (int i = 0; i < text.length() && col < width; i++, col++) {
-            screen[row][col] = new Cell(
-                text.charAt(i), 
-                this.currentFg, 
-                this.currentBg, 
-                this.currentStyle
-            );
+            screenChars[row][col] = text.charAt(i);
+            screenStyleIds[row][col] = currentAttributesId;
         }
 
         setCursorPosition(row, col);
@@ -176,23 +207,31 @@ public class TerminalBuffer {
     }
 
     public void fillCurrentLine(Character character) {
-        Cell fillCell = character == null
-                ? Cell.EMPTY
-                : new Cell(character, this.currentFg, this.currentBg, this.currentStyle);
-        Arrays.fill(this.screen[cursor.row()], fillCell);
+        int row = cursor.row();
+        if (character == null) {
+            Arrays.fill(this.screenChars[row], EMPTY_CHAR);
+            Arrays.fill(this.screenStyleIds[row], defaultAttributesId);
+            return;
+        }
+
+        Arrays.fill(this.screenChars[row], character);
+        Arrays.fill(this.screenStyleIds[row], currentAttributesId);
     }
 
     public void insertEmptyLineAtBottom() {
-        pushToScrollback(this.screen[0].clone());
+        pushToScrollback(cloneScreenLine(0));
         for (int row = 0; row < height - 1; row++) {
-            this.screen[row] = this.screen[row + 1];
+            this.screenChars[row] = this.screenChars[row + 1];
+            this.screenStyleIds[row] = this.screenStyleIds[row + 1];
         }
-        this.screen[height - 1] = blankLine();
+        this.screenChars[height - 1] = blankCharLine();
+        this.screenStyleIds[height - 1] = blankStyleLine();
     }
 
     public void clearScreen() {
         for (int i = 0; i < height; i++) {
-            screen[i] = blankLine();
+            screenChars[i] = blankCharLine();
+            screenStyleIds[i] = blankStyleLine();
         }
         setCursorPosition(0, 0);
     }
@@ -206,21 +245,23 @@ public class TerminalBuffer {
         if (newWidth <= 0) throw new IllegalArgumentException("newWidth must be positive, got " + newWidth);
         if (newHeight <= 0) throw new IllegalArgumentException("newHeight must be positive, got " + newHeight);
 
-        int oldWidth = this.width;
         int oldHeight = this.height;
-        Cell[][] oldScreen = this.screen;
+        char[][] oldScreenChars = this.screenChars;
+        int[][] oldScreenStyleIds = this.screenStyleIds;
 
-        Cell[][] newScreen = new Cell[newHeight][];
+        char[][] newScreenChars = new char[newHeight][];
+        int[][] newScreenStyleIds = new int[newHeight][];
         for (int row = 0; row < newHeight; row++) {
-            newScreen[row] = blankLine(newWidth);
+            newScreenChars[row] = blankCharLine(newWidth);
+            newScreenStyleIds[row] = blankStyleLine(newWidth);
         }
 
         int pulledFromScrollback = 0;
         if (newHeight > oldHeight && !scrollback.isEmpty()) {
             pulledFromScrollback = Math.min(newHeight - oldHeight, scrollback.size());
             for (int targetRow = pulledFromScrollback - 1; targetRow >= 0; targetRow--) {
-                Cell[] source = scrollback.removeLast();
-                copyLineToWidth(source, newScreen[targetRow], newWidth);
+                LineData source = scrollback.removeLast();
+                copyLineToWidth(source, newScreenChars[targetRow], newScreenStyleIds[targetRow], newWidth);
             }
         }
 
@@ -230,17 +271,24 @@ public class TerminalBuffer {
 
         if (newHeight < oldHeight) {
             for (int row = 0; row < sourceStartRow; row++) {
-                pushToScrollback(oldScreen[row].clone());
+                pushToScrollback(cloneLineData(oldScreenChars[row], oldScreenStyleIds[row]));
             }
         }
 
         for (int rowOffset = 0; rowOffset < rowsToCopy && targetStartRow + rowOffset < newHeight; rowOffset++) {
-            Cell[] source = oldScreen[sourceStartRow + rowOffset];
-            Cell[] target = newScreen[targetStartRow + rowOffset];
-            copyLineToWidth(source, target, newWidth);
+            int sourceRow = sourceStartRow + rowOffset;
+            int targetRow = targetStartRow + rowOffset;
+            copyLineToWidth(
+                    oldScreenChars[sourceRow],
+                    oldScreenStyleIds[sourceRow],
+                    newScreenChars[targetRow],
+                    newScreenStyleIds[targetRow],
+                    newWidth
+            );
         }
 
-        this.screen = newScreen;
+        this.screenChars = newScreenChars;
+        this.screenStyleIds = newScreenStyleIds;
         this.width = newWidth;
         this.height = newHeight;
         resizeScrollbackLinesToWidth(newWidth);
@@ -264,25 +312,24 @@ public class TerminalBuffer {
         if (n < 0) throw new IllegalArgumentException("n must be non-negative, got " + n);
     }
 
-    private Cell screenCellAt(int row, int col) {
-        validateRow(row);
-        validateCol(col);
-        return screen[row][col];
-    }
-
-    private Cell scrollbackCellAt(int lineIndex, int col) {
+    private LineData scrollbackLineDataAt(int lineIndex) {
         if (lineIndex < 0 || lineIndex >= scrollback.size()) {
             throw new IllegalArgumentException("scrollback index out of bounds: " + lineIndex);
         }
-        validateCol(col);
-        Cell[][] snapshot = scrollback.toArray(new Cell[0][]);
-        return snapshot[lineIndex][col];
+        int i = 0;
+        for (LineData line : scrollback) {
+            if (i == lineIndex) {
+                return line;
+            }
+            i++;
+        }
+        throw new IllegalStateException("scrollback index not found: " + lineIndex);
     }
 
-    private String lineToString(List<Cell> line) {
-        StringBuilder sb = new StringBuilder(line.size());
-        for (Cell cell : line) {
-            sb.append(cell.character() == null ? ' ' : cell.character());
+    private String lineToString(char[] chars) {
+        StringBuilder sb = new StringBuilder(chars.length);
+        for (char ch : chars) {
+            sb.append(ch == EMPTY_CHAR ? ' ' : ch);
         }
         return sb.toString();
     }
@@ -302,14 +349,20 @@ public class TerminalBuffer {
     private void insertCharAtCursor(char ch) {
         int row = cursor.row();
         int col = cursor.col();
-        Cell carry = new Cell(ch, this.currentFg, this.currentBg, this.currentStyle);
+        char carryChar = ch;
+        int carryStyleId = currentAttributesId;
 
         for (int r = row; r < height; r++) {
             int startCol = (r == row) ? col : 0;
             for (int c = startCol; c < width; c++) {
-                Cell tmp = screen[r][c];
-                screen[r][c] = carry;
-                carry = tmp;
+                char tmpChar = screenChars[r][c];
+                int tmpStyleId = screenStyleIds[r][c];
+
+                screenChars[r][c] = carryChar;
+                screenStyleIds[r][c] = (carryChar == EMPTY_CHAR) ? defaultAttributesId : carryStyleId;
+
+                carryChar = tmpChar;
+                carryStyleId = tmpStyleId;
             }
         }
     }
@@ -328,7 +381,7 @@ public class TerminalBuffer {
         setCursorPosition(height - 1, width - 1);
     }
 
-    private void pushToScrollback(Cell[] line) {
+    private void pushToScrollback(LineData line) {
         if (this.scrollbackMaxSize == 0) {
             return;
         }
@@ -338,19 +391,32 @@ public class TerminalBuffer {
         }
     }
 
-    private Cell[] blankLine() {
-        return blankLine(this.width);
+    private char[] blankCharLine() {
+        return blankCharLine(this.width);
     }
 
-    private Cell[] blankLine(int targetWidth) {
-        Cell[] line = new Cell[targetWidth];
-        Arrays.fill(line, Cell.EMPTY);
+    private char[] blankCharLine(int targetWidth) {
+        return new char[targetWidth];
+    }
+
+    private int[] blankStyleLine() {
+        return blankStyleLine(this.width);
+    }
+
+    private int[] blankStyleLine(int targetWidth) {
+        int[] line = new int[targetWidth];
+        Arrays.fill(line, defaultAttributesId);
         return line;
     }
 
-    private void copyLineToWidth(Cell[] source, Cell[] target, int targetWidth) {
-        int copyLength = Math.min(source.length, targetWidth);
-        System.arraycopy(source, 0, target, 0, copyLength);
+    private void copyLineToWidth(LineData source, char[] targetChars, int[] targetStyleIds, int targetWidth) {
+        copyLineToWidth(source.chars, source.styleIds, targetChars, targetStyleIds, targetWidth);
+    }
+
+    private void copyLineToWidth(char[] sourceChars, int[] sourceStyleIds, char[] targetChars, int[] targetStyleIds, int targetWidth) {
+        int copyLength = Math.min(sourceChars.length, targetWidth);
+        System.arraycopy(sourceChars, 0, targetChars, 0, copyLength);
+        System.arraycopy(sourceStyleIds, 0, targetStyleIds, 0, copyLength);
     }
 
     private void resizeScrollbackLinesToWidth(int targetWidth) {
@@ -358,13 +424,58 @@ public class TerminalBuffer {
             return;
         }
 
-        Cell[][] snapshot = scrollback.toArray(new Cell[0][]);
-        scrollback.clear();
-        for (Cell[] oldLine : snapshot) {
-            Cell[] resized = blankLine(targetWidth);
-            int copyLength = Math.min(oldLine.length, targetWidth);
-            System.arraycopy(oldLine, 0, resized, 0, copyLength);
-            scrollback.addLast(resized);
+        ArrayDeque<LineData> resized = new ArrayDeque<>(scrollback.size());
+        for (LineData oldLine : scrollback) {
+            char[] resizedChars = blankCharLine(targetWidth);
+            int[] resizedStyleIds = blankStyleLine(targetWidth);
+            int copyLength = Math.min(oldLine.chars.length, targetWidth);
+            System.arraycopy(oldLine.chars, 0, resizedChars, 0, copyLength);
+            System.arraycopy(oldLine.styleIds, 0, resizedStyleIds, 0, copyLength);
+            resized.addLast(new LineData(resizedChars, resizedStyleIds));
         }
+
+        scrollback.clear();
+        scrollback.addAll(resized);
+    }
+
+    private LineData cloneScreenLine(int row) {
+        return cloneLineData(screenChars[row], screenStyleIds[row]);
+    }
+
+    private LineData cloneLineData(char[] chars, int[] styleIds) {
+        return new LineData(chars.clone(), styleIds.clone());
+    }
+
+    private Cell[] cellsFromLine(char[] chars, int[] styleIds) {
+        Cell[] result = new Cell[chars.length];
+        for (int i = 0; i < chars.length; i++) {
+            result[i] = cellFromRaw(chars[i], styleIds[i]);
+        }
+        return result;
+    }
+
+    private Cell cellFromRaw(char ch, int styleId) {
+        if (ch == EMPTY_CHAR) {
+            return Cell.EMPTY;
+        }
+        return new Cell(ch, attributesById.get(styleId));
+    }
+
+    private Character charAsNullable(char ch) {
+        if (ch == EMPTY_CHAR) {
+            return null;
+        }
+        return ch;
+    }
+
+    private int internAttributes(CellAttributes attrs) {
+        Integer existingId = attributeIds.get(attrs);
+        if (existingId != null) {
+            return existingId;
+        }
+        int newId = attributesById.size();
+        attributesById.add(attrs);
+        attributeIds.put(attrs, newId);
+        return newId;
     }
 }
