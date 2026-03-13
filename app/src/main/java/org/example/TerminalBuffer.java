@@ -61,6 +61,14 @@ public class TerminalBuffer {
         return scrollbackCellAt(lineIndex, col).character();
     }
 
+    public CellAttributes getScreenAttributesAt(int row, int col) {
+        return screenCellAt(row, col).attributes();
+    }
+
+    public CellAttributes getScrollbackAttributesAt(int lineIndex, int col) {
+        return scrollbackCellAt(lineIndex, col).attributes();
+    }
+
     // Attributes
     public TerminalColor getCurrentFg() { return currentFg; }
     public TerminalColor getCurrentBg() { return currentBg; }

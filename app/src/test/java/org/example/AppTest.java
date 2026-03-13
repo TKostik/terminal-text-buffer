@@ -62,9 +62,9 @@ class AppTest {
         assertEquals(new CursorPosition(0, 4), buffer.getCursorPosition());
         Cell cell = buffer.screenLine(0).get(1);
         assertEquals('a', cell.character());
-        assertEquals(TerminalColor.RED, cell.fg());
-        assertEquals(TerminalColor.BLUE, cell.bg());
-        assertEquals(new CellStyle(true, false, false), cell.style());
+        assertEquals(TerminalColor.RED, cell.attributes().fg());
+        assertEquals(TerminalColor.BLUE, cell.attributes().bg());
+        assertEquals(new CellStyle(true, false, false), cell.attributes().style());
     }
 
     @Test
@@ -91,7 +91,7 @@ class AppTest {
 
         buffer.fillCurrentLine('*');
         assertEquals("****", lineToChars(buffer.screenLine(1)));
-        assertEquals(TerminalColor.GREEN, buffer.screenLine(1).get(0).fg());
+        assertEquals(TerminalColor.GREEN, buffer.screenLine(1).get(0).attributes().fg());
 
         buffer.fillCurrentLine(null);
         assertEquals("    ", lineToChars(buffer.screenLine(1)));
