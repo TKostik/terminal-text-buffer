@@ -53,6 +53,14 @@ public class TerminalBuffer {
         return Collections.unmodifiableList(Arrays.asList(snapshot[index].clone()));
     }
 
+    public Character getScreenCharacterAt(int row, int col) {
+        return screenCellAt(row, col).character();
+    }
+
+    public Character getScrollbackCharacterAt(int lineIndex, int col) {
+        return scrollbackCellAt(lineIndex, col).character();
+    }
+
     // Attributes
     public TerminalColor getCurrentFg() { return currentFg; }
     public TerminalColor getCurrentBg() { return currentBg; }
@@ -156,6 +164,32 @@ public class TerminalBuffer {
 
     private void raiseExcIfNegative(int n) {
         if (n < 0) throw new IllegalArgumentException("n must be non-negative, got " + n);
+    }
+
+    private Cell screenCellAt(int row, int col) {
+        validateRow(row);
+        validateCol(col);
+        return screen[row][col];
+    }
+
+    private Cell scrollbackCellAt(int lineIndex, int col) {
+        if (lineIndex < 0 || lineIndex >= scrollback.size()) {
+            throw new IllegalArgumentException("scrollback index out of bounds: " + lineIndex);
+        }
+        validateCol(col);
+        Cell[][] snapshot = scrollback.toArray(new Cell[0][]);
+        return snapshot[lineIndex][col];
+    }
+    private void validateRow(int row) {
+        if (row < 0 || row >= height) {
+            throw new IllegalArgumentException("row out of bounds: " + row);
+        }
+    }
+
+    private void validateCol(int col) {
+        if (col < 0 || col >= width) {
+            throw new IllegalArgumentException("col out of bounds: " + col);
+        }
     }
 
     private void insertCharAtCursor(char ch) {
