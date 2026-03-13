@@ -77,6 +77,34 @@ public class TerminalBuffer {
         return lineToString(scrollbackLine(index));
     }
 
+    public String getScreenContentAsString() {
+        StringBuilder sb = new StringBuilder();
+        for (int row = 0; row < height; row++) {
+            if (row > 0) {
+                sb.append('\n');
+            }
+            sb.append(getScreenLineAsString(row));
+        }
+        return sb.toString();
+    }
+
+    public String getScreenAndScrollbackContentAsString() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < scrollback.size(); i++) {
+            if (sb.length() > 0) {
+                sb.append('\n');
+            }
+            sb.append(getScrollbackLineAsString(i));
+        }
+        for (int row = 0; row < height; row++) {
+            if (sb.length() > 0) {
+                sb.append('\n');
+            }
+            sb.append(getScreenLineAsString(row));
+        }
+        return sb.toString();
+    }
+
     // Attributes
     public TerminalColor getCurrentFg() { return currentFg; }
     public TerminalColor getCurrentBg() { return currentBg; }
