@@ -69,6 +69,14 @@ public class TerminalBuffer {
         return scrollbackCellAt(lineIndex, col).attributes();
     }
 
+    public String getScreenLineAsString(int row) {
+        return lineToString(screenLine(row));
+    }
+
+    public String getScrollbackLineAsString(int index) {
+        return lineToString(scrollbackLine(index));
+    }
+
     // Attributes
     public TerminalColor getCurrentFg() { return currentFg; }
     public TerminalColor getCurrentBg() { return currentBg; }
@@ -188,6 +196,15 @@ public class TerminalBuffer {
         Cell[][] snapshot = scrollback.toArray(new Cell[0][]);
         return snapshot[lineIndex][col];
     }
+
+    private String lineToString(List<Cell> line) {
+        StringBuilder sb = new StringBuilder(line.size());
+        for (Cell cell : line) {
+            sb.append(cell.character() == null ? ' ' : cell.character());
+        }
+        return sb.toString();
+    }
+
     private void validateRow(int row) {
         if (row < 0 || row >= height) {
             throw new IllegalArgumentException("row out of bounds: " + row);
